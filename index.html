@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>CodeArena – Online Code Judge</title>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="css/style.css"/>
+</head>
+<body>
+  <div id="loadbar"></div>
+  <nav>
+    <div class="logo">Code<span>Arena</span></div>
+    <ul class="nav-links">
+      <li><a onclick="showPage('home')" id="nav-home" class="active">Home</a></li>
+      <li><a onclick="showPage('problems')" id="nav-problems">Problems</a></li>
+      <li><a onclick="showPage('compiler')" id="nav-compiler">Compiler</a></li>
+      <li><a onclick="showPage('terminal')" id="nav-terminal">Terminal</a></li>
+      <li><a onclick="showPage('leaderboard')" id="nav-leaderboard">Leaderboard</a></li>
+      <li><a onclick="showPage('profile')" id="nav-profile">Profile</a></li>
+    </ul>
+    <div class="nav-right">
+      <button class="btn btn-ghost" onclick="openModal('login')">Sign In</button>
+      <button class="btn btn-primary" onclick="openModal('register')">Register</button>
+    </div>
+  </nav>
+
+  <div id="page-home" class="page active">
+    <div class="hero">
+      <div class="hero-tag">⚡ 100 Problems · 5 Languages · Live Terminal</div>
+      <h1>The Ultimate<br/><span class="hl">Code Arena</span></h1>
+      <p>Practice 100 curated algorithm problems, compile in 5 languages, and explore a real Linux-style terminal — all in one place.</p>
+      <div class="hero-cta">
+        <button class="btn btn-primary btn-lg" onclick="showPage('problems')">Solve Problems</button>
+        <button class="btn btn-ghost btn-lg" onclick="showPage('terminal')">Open Terminal</button>
+        <button class="btn btn-ghost btn-lg" onclick="showPage('compiler')">Compiler</button>
+      </div>
+      <div class="stats-row">
+        <div class="stat"><span class="stat-num" id="c-problems">0</span><span class="stat-label">Problems</span></div>
+        <div class="stat"><span class="stat-num" id="c-users">0</span><span class="stat-label">Users</span></div>
+        <div class="stat"><span class="stat-num" id="c-submissions">0</span><span class="stat-label">Submissions</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="page-problems" class="page">
+    <div class="problems-page">
+      <div class="page-header">
+        <div class="page-title">Problems <span style="font-size:.85rem;color:var(--muted);font-weight:400" id="prob-count"></span></div>
+        <input class="search-input" placeholder="🔍 Search problems…" oninput="filterProblems(this.value)" id="problem-search"/>
+      </div>
+      <div class="filters">
+        <button class="filter-btn active" onclick="setDiff('all',this)">All</button>
+        <button class="filter-btn" onclick="setDiff('Easy',this)">Easy</button>
+        <button class="filter-btn" onclick="setDiff('Medium',this)">Medium</button>
+        <button class="filter-btn" onclick="setDiff('Hard',this)">Hard</button>
+      </div>
+      <table class="problems-table">
+        <thead><tr><th width="44">#</th><th>Title</th><th>Difficulty</th><th>Tags</th><th>Acceptance</th><th width="30"></th></tr></thead>
+        <tbody id="problems-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="page-solve" class="page solve-page">
+    <div class="problem-panel" id="problem-panel-content"></div>
+    <div class="editor-panel">
+      <div class="editor-toolbar">
+        <select class="lang-select" id="lang-select" onchange="changeLang(this.value)">
+          <option value="python">Python 3</option>
+          <option value="javascript">JavaScript</option>
+          <option value="java">Java</option>
+          <option value="cpp">C++</option>
+          <option value="c">C</option>
+        </select>
+        <div style="display:flex;gap:.4rem;align-items:center">
+          <button class="btn btn-ghost" onclick="resetCode()" style="font-size:.73rem">↺ Reset</button>
+          <button class="btn btn-run" onclick="runCode()">▶ Run</button>
+          <button class="btn btn-submit" onclick="submitCode()">↑ Submit</button>
+        </div>
+      </div>
+      <div class="editor-area">
+        <div class="line-numbers" id="line-numbers"></div>
+        <textarea class="code-editor" id="code-editor" spellcheck="false" oninput="updateLineNums()" onkeydown="handleTab(event)"></textarea>
+      </div>
+      <div class="output-panel">
+        <div class="output-tabs">
+          <div class="output-tab active" onclick="switchTab('tc',this)">Test Cases</div>
+          <div class="output-tab" onclick="switchTab('res',this)">Results</div>
+          <div class="output-tab" onclick="switchTab('sub',this)">Submissions</div>
+        </div>
+        <div class="output-content" id="output-content"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="page-compiler" class="page compiler-page">
+    <div class="compiler-topbar">
+      <div class="compiler-lang-tabs" id="clang-tabs">
+        <button class="clang-tab active" onclick="switchCLang('python',this)"><span class="ldot" style="background:#3b82f6"></span>Python</button>
+        <button class="clang-tab" onclick="switchCLang('javascript',this)"><span class="ldot" style="background:#f59e0b"></span>JavaScript</button>
+        <button class="clang-tab" onclick="switchCLang('java',this)"><span class="ldot" style="background:#f97316"></span>Java</button>
+        <button class="clang-tab" onclick="switchCLang('cpp',this)"><span class="ldot" style="background:#a78bfa"></span>C++</button>
+        <button class="clang-tab" onclick="switchCLang('c',this)"><span class="ldot" style="background:#34d399"></span>C</button>
+      </div>
+      <div class="compiler-actions">
+        <select class="ctrl-select" onchange="cFontSize(this.value)"><option value="13">13px</option><option value="14" selected>14px</option><option value="16">16px</option><option value="18">18px</option></select>
+        <select class="ctrl-select" onchange="cTheme(this.value)"><option value="dark">Dark</option><option value="midnight">Midnight</option><option value="forest">Forest</option><option value="light">Light</option></select>
+        <button class="btn btn-ghost" style="font-size:.73rem" onclick="clearComp()">✕ Clear</button>
+        <button class="btn btn-ghost" style="font-size:.73rem" onclick="copyComp()">⎘ Copy</button>
+        <button class="btn btn-run" onclick="compRun()">▶ Run Code</button>
+      </div>
+    </div>
+    <div class="snip-bar" id="snip-bar"></div>
+    <div class="compiler-body">
+      <div class="comp-editor-wrap">
+        <div class="comp-editor-header"><span id="comp-file">main.py</span><span id="comp-cursor">Ln 1, Col 1</span></div>
+        <div class="comp-editor-area">
+          <div class="comp-line-nums" id="comp-lnums"></div>
+          <textarea class="comp-textarea" id="comp-textarea" spellcheck="false" oninput="onCompInput()" onkeydown="compTab(event)" onclick="updCursor()" onkeyup="updCursor()"></textarea>
+        </div>
+      </div>
+      <div class="comp-right">
+        <div class="comp-stdin-wrap">
+          <div class="comp-panel-hdr"><span>📥 stdin</span><button class="btn btn-ghost" style="font-size:.65rem;padding:.18rem .45rem" onclick="document.getElementById('comp-stdin').value=''">Clear</button></div>
+          <textarea class="comp-stdin" id="comp-stdin" placeholder="Enter program input here…&#10;Example:&#10;5&#10;1 2 3 4 5"></textarea>
+        </div>
+        <div class="comp-out-wrap">
+          <div class="comp-panel-hdr"><span>📤 Output</span><span id="comp-status" style="font-size:.65rem;padding:.12rem .45rem;border-radius:100px;background:rgba(100,116,139,.15);color:var(--muted)">Idle</span></div>
+          <div class="comp-output out-idle" id="comp-output">// Output will appear here after you click Run Code.</div>
+          <div class="out-meta" id="comp-meta" style="display:none"><span>⏱ <span id="comp-time">—</span></span><span>💾 <span id="comp-mem">—</span></span><span id="comp-lang-tag">—</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="page-terminal" class="page terminal-page">
+    <div class="term-sidebar">
+      <div class="term-sidebar-hdr">📁 Explorer</div>
+      <div class="term-fs" id="term-fs"></div>
+    </div>
+    <div class="term-main">
+      <div class="term-tabs" id="term-tabs">
+        <div class="term-tab active" id="ttab-0" onclick="switchTTab(0)">
+          <span>bash — ~</span>
+          <span class="term-tab-close" onclick="closeTTab(event,0)">✕</span>
+        </div>
+        <button class="add-tab-btn" onclick="addTTab()" title="New terminal tab">+</button>
+      </div>
+      <div class="term-window">
+        <div class="term-titlebar">
+          <div class="term-dots">
+            <div class="term-dot dot-r"></div>
+            <div class="term-dot dot-y"></div>
+            <div class="term-dot dot-g"></div>
+          </div>
+          <div class="term-title" id="term-title">user@codearena: ~</div>
+          <div class="term-ctrls">
+            <button class="term-btn" onclick="clearTerm()">Clear</button>
+            <button class="term-btn" onclick="termHelp()">Help</button>
+          </div>
+        </div>
+        <div class="term-output" id="term-output"></div>
+        <div class="term-input-row">
+          <span class="t-inp-ps1">user</span>
+          <span class="t-inp-at">@</span>
+          <span class="t-inp-host">codearena</span>
+          <span class="t-inp-path" id="term-path-label">:~$</span>
+          <span class="t-inp-dollar">&nbsp;</span>
+          <input class="term-input" id="term-input" placeholder="Type a command and press Enter…" autocomplete="off" spellcheck="false" onkeydown="handleTermKey(event)"/>
+        </div>
+      </div>
+    </div>
+    <div class="term-info">
+      <div class="info-card">
+        <div class="info-card-title">📟 Commands</div>
+        <div class="cmd-row"><span class="cmd-k">ls [-la]</span><span class="cmd-v">list files</span></div>
+        <div class="cmd-row"><span class="cmd-k">cd &lt;dir&gt;</span><span class="cmd-v">change dir</span></div>
+        <div class="cmd-row"><span class="cmd-k">pwd</span><span class="cmd-v">print path</span></div>
+        <div class="cmd-row"><span class="cmd-k">cat &lt;file&gt;</span><span class="cmd-v">view file</span></div>
+        <div class="cmd-row"><span class="cmd-k">touch &lt;f&gt;</span><span class="cmd-v">create file</span></div>
+        <div class="cmd-row"><span class="cmd-k">mkdir &lt;d&gt;</span><span class="cmd-v">create dir</span></div>
+        <div class="cmd-row"><span class="cmd-k">rm &lt;file&gt;</span><span class="cmd-v">remove file</span></div>
+        <div class="cmd-row"><span class="cmd-k">rmdir &lt;d&gt;</span><span class="cmd-v">remove dir</span></div>
+        <div class="cmd-row"><span class="cmd-k">cp a b</span><span class="cmd-v">copy file</span></div>
+        <div class="cmd-row"><span class="cmd-k">mv a b</span><span class="cmd-v">move/rename</span></div>
+        <div class="cmd-row"><span class="cmd-k">echo text</span><span class="cmd-v">print text</span></div>
+        <div class="cmd-row"><span class="cmd-k">echo &gt;f</span><span class="cmd-v">write file</span></div>
+        <div class="cmd-row"><span class="cmd-k">grep p f</span><span class="cmd-v">search file</span></div>
+        <div class="cmd-row"><span class="cmd-k">wc &lt;file&gt;</span><span class="cmd-v">word count</span></div>
+        <div class="cmd-row"><span class="cmd-k">sort &lt;f&gt;</span><span class="cmd-v">sort lines</span></div>
+        <div class="cmd-row"><span class="cmd-k">head/tail</span><span class="cmd-v">view lines</span></div>
+        <div class="cmd-row"><span class="cmd-k">python3</span><span class="cmd-v">run python</span></div>
+        <div class="cmd-row"><span class="cmd-k">node</span><span class="cmd-v">run js</span></div>
+        <div class="cmd-row"><span class="cmd-k">gcc / g++</span><span class="cmd-v">compile C/C++</span></div>
+        <div class="cmd-row"><span class="cmd-k">history</span><span class="cmd-v">cmd history</span></div>
+        <div class="cmd-row"><span class="cmd-k">clear</span><span class="cmd-v">clear screen</span></div>
+        <div class="cmd-row"><span class="cmd-k">whoami</span><span class="cmd-v">current user</span></div>
+        <div class="cmd-row"><span class="cmd-k">date</span><span class="cmd-v">current date</span></div>
+        <div class="cmd-row"><span class="cmd-k">uname -a</span><span class="cmd-v">system info</span></div>
+        <div class="cmd-row"><span class="cmd-k">ps</span><span class="cmd-v">processes</span></div>
+      </div>
+      <div class="info-card">
+        <div class="info-card-title">⌨️ Shortcuts</div>
+        <div class="cmd-row"><span class="cmd-k">↑ / ↓</span><span class="cmd-v">history nav</span></div>
+        <div class="cmd-row"><span class="cmd-k">Tab</span><span class="cmd-v">autocomplete</span></div>
+        <div class="cmd-row"><span class="cmd-k">Ctrl+C</span><span class="cmd-v">cancel</span></div>
+        <div class="cmd-row"><span class="cmd-k">Ctrl+L</span><span class="cmd-v">clear</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="page-leaderboard" class="page">
+    <div class="lb-page">
+      <div class="page-header"><div class="page-title">🏆 Global Leaderboard</div></div>
+      <table class="rank-table"><thead><tr><th>Rank</th><th>User</th><th>Score</th><th>Solved</th><th>Streak</th><th>Progress</th></tr></thead><tbody id="lb-tbody"></tbody></table>
+    </div>
+  </div>
+
+  <div id="page-profile" class="page">
+    <div class="profile-page">
+      <div class="profile-header">
+        <div class="profile-avatar">K</div>
+        <div class="profile-info"><h2>Krish</h2><p>Member since Jan 2024 · Rank #42</p></div>
+      </div>
+      <div class="profile-stats">
+        <div class="stat-card"><div class="stat-card-num" style="color:var(--green)">47</div><div class="stat-card-label">Problems Solved</div></div>
+        <div class="stat-card"><div class="stat-card-num" style="color:var(--yellow)">12</div><div class="stat-card-label">Day Streak 🔥</div></div>
+        <div class="stat-card"><div class="stat-card-num" style="color:var(--accent)">3,240</div><div class="stat-card-label">Total Score</div></div>
+        <div class="stat-card"><div class="stat-card-num" style="color:var(--accent2)">89%</div><div class="stat-card-label">Acceptance Rate</div></div>
+      </div>
+      <div class="stat-card" style="margin-bottom:1.5rem"><div class="info-card-title" style="margin-bottom:.875rem">Submission Activity</div><div class="heatmap" id="heatmap"></div></div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="modal-login">
+    <div class="modal"><h2>Welcome back</h2><p>Sign in to your CodeArena account.</p>
+      <div class="form-group"><label class="form-label">Email</label><input class="form-input" type="email" placeholder="you@example.com"/></div>
+      <div class="form-group"><label class="form-label">Password</label><input class="form-input" type="password" placeholder="••••••••"/></div>
+      <div class="modal-footer"><button class="btn btn-primary" style="flex:1;padding:.6rem" onclick="fakeAuth('login')">Sign In</button><button class="btn btn-ghost" onclick="closeModal('login')">Cancel</button></div>
+    </div>
+  </div>
+  <div class="modal-overlay" id="modal-register">
+    <div class="modal"><h2>Create account</h2><p>Join thousands of developers on CodeArena.</p>
+      <div class="form-group"><label class="form-label">Username</label><input class="form-input" placeholder="coolcoder42"/></div>
+      <div class="form-group"><label class="form-label">Email</label><input class="form-input" type="email" placeholder="you@example.com"/></div>
+      <div class="form-group"><label class="form-label">Password</label><input class="form-input" type="password" placeholder="••••••••"/></div>
+      <div class="modal-footer"><button class="btn btn-primary" style="flex:1;padding:.6rem" onclick="fakeAuth('register')">Create Account</button><button class="btn btn-ghost" onclick="closeModal('register')">Cancel</button></div>
+    </div>
+  </div>
+  <div id="toast"></div>
+
+  <script src="js/questions.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
