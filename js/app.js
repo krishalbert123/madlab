@@ -1,4 +1,6 @@
 let curProblem = null, diffFilter = 'all', submissions = [], activeTab = 'tc';
+let debugFilter = 'all', debugSearch = '', curDebugProblem = null, debugSubmissions = [];
+let restrictedClipboardMode = false;
 
 function showPage(name){
   document.querySelectorAll('.page').forEach((p) => p.classList.remove('active'));
@@ -8,6 +10,7 @@ function showPage(name){
   const nav = document.getElementById('nav-' + name);
   if (nav) nav.classList.add('active');
   if (name === 'problems') renderProblems();
+  if (name === 'debugging') renderDebuggingProblems();
   if (name === 'leaderboard') renderLB();
   if (name === 'profile') renderHeatmap();
   if (name === 'compiler') initCompiler();
@@ -57,7 +60,42 @@ function setDiff(d, btn) {
 
 function filterProblems(v) { renderProblems(v); }
 
+function setDebugDiff(d, btn) {
+  debugFilter = d;
+  document.querySelectorAll('#page-debugging .filter-btn').forEach((b) => b.classList.remove('active'));
+  btn.classList.add('active');
+  renderDebuggingProblems(document.getElementById('debug-search').value);
+}
+
+function filterDebugging(v) {
+  debugSearch = v;
+  renderDebuggingProblems(v);
+}
+
+function renderDebuggingProblems(search = '') {
+  const q = search.toLowerCase();
+  const list = DEBUGGING_QUESTIONS.filter((p) => {
+    const dm = debugFilter === 'all' || p.difficulty === debugFilter;
+    const sm = !q || p.title.toLowerCase().includes(q) || p.topic.toLowerCase().includes(q);
+    return dm && sm;
+  });
+  document.getElementById('debug-count').textContent = `(${list.length})`;
+  document.getElementById('debug-tbody').innerHTML = list.map((p) => {
+    const solved = getStoredProgress().debugging.includes(p.id) ? '✓' : '—';
+    return `
+      <tr onclick="openDebugProblem(${p.id})">
+        <td style="color:var(--muted);font-family:var(--font-code);font-size:.8rem">#${p.id}</td>
+        <td><strong>${p.title}</strong></td>
+        <td><span class="diff-badge diff-${p.difficulty === 'Moderate' ? 'medium' : p.difficulty.toLowerCase()}">${p.difficulty}</span></td>
+        <td><span class="tag-chip">${p.topic}</span></td>
+        <td style="font-family:var(--font-code);font-weight:700;color:var(--accent)">${p.score}</td>
+        <td style="color:${solved === '✓' ? 'var(--green)' : 'var(--muted)'}">${solved}</td>
+      </tr>`;
+  }).join('');
+}
+
 function openProblem(id) {
+  curDebugProblem = null;
   curProblem = PROBLEMS.find((p) => p.id === id);
   if (!curProblem) return;
   document.getElementById('problem-panel-content').innerHTML = `
@@ -85,19 +123,95 @@ function openProblem(id) {
   document.querySelectorAll('.nav-links a').forEach((a) => a.classList.remove('active'));
 }
 
+function openDebugProblem(id) {
+  curProblem = null;
+  curDebugProblem = DEBUGGING_QUESTIONS.find((p) => p.id === id);
+  if (!curDebugProblem) return;
+  const question = curDebugProblem;
+  const lang = document.getElementById('lang-select').value;
+  document.getElementById('problem-panel-content').innerHTML = `
+    <div class="problem-meta">
+      <span class="diff-badge diff-${question.difficulty === 'Moderate' ? 'medium' : question.difficulty.toLowerCase()}">${question.difficulty}</span>
+      <span class="tag-chip">${question.topic}</span>
+      <span class="tag-chip">${question.score} pts</span>
+    </div>
+    <div class="problem-title">#${question.id}. ${question.title}</div>
+    <div class="problem-desc">${question.description}</div>
+    <div class="sec-label">Expected behavior</div>
+    <div class="example-block"><strong>Expected:</strong> ${question.expectedBehavior}</div>
+    <div class="sec-label">Actual behavior</div>
+    <div class="example-block"><strong>Buggy result:</strong> ${question.actualBehavior}</div>
+    <div class="sec-label">Buggy code</div>
+    <pre class="example-block" style="white-space:pre-wrap;">${escapeHTML(question.buggyCode)}</pre>
+    <div class="sec-label">Hints</div>
+    <ul class="cons-list">${question.hints.map((h) => `<li>${h}</li>`).join('')}</ul>
+    <div class="sec-label">Tests</div>
+    ${question.tests.map((t, i) => `<div class="example-block"><strong>Case ${i + 1}:</strong> Input: ${t.input}<br><strong>Expected:</strong> ${t.expected}</div>`).join('')}
+  `;
+  document.getElementById('code-editor').value = question.starterCode[lang] || question.buggyCode;
+  updateLineNums();
+  switchTab('tc', null);
+  document.querySelectorAll('.page').forEach((p) => p.classList.remove('active'));
+  document.getElementById('page-solve').classList.add('active');
+  document.querySelectorAll('.nav-links a').forEach((a) => a.classList.remove('active'));
+}
+
 function changeLang(l) {
   if (curProblem) {
     document.getElementById('code-editor').value = curProblem.starterCode[l];
     updateLineNums();
   }
+  if (curDebugProblem) {
+    const starter = curDebugProblem.starterCode[l] || curDebugProblem.buggyCode;
+    document.getElementById('code-editor').value = starter;
+    updateLineNums();
+  }
 }
 
 function resetCode() {
+  if (curDebugProblem) {
+    const l = document.getElementById('lang-select').value;
+    document.getElementById('code-editor').value = curDebugProblem.starterCode[l] || curDebugProblem.buggyCode;
+    updateLineNums();
+    showToast('Debug template reset', '');
+    return;
+  }
   if (!curProblem) return;
   const l = document.getElementById('lang-select').value;
   document.getElementById('code-editor').value = curProblem.starterCode[l];
   updateLineNums();
   showToast('Code reset', '');
+}
+
+function toggleRestrictedMode(enabled) {
+  restrictedClipboardMode = enabled;
+  const ed = document.getElementById('code-editor');
+  if (!ed) return;
+  ed.setAttribute('data-restricted', enabled ? 'true' : 'false');
+  if (enabled) {
+    showToast('Restricted clipboard mode enabled', 'success');
+    ed.addEventListener('copy', blockClipboardEvent, { passive: false });
+    ed.addEventListener('cut', blockClipboardEvent, { passive: false });
+    ed.addEventListener('paste', blockClipboardEvent, { passive: false });
+    ed.addEventListener('contextmenu', blockContextMenu, { passive: false });
+  } else {
+    showToast('Normal practice mode enabled', '');
+    ['copy','cut','paste','contextmenu'].forEach((evt) => {
+      ed.removeEventListener(evt, evt === 'contextmenu' ? blockContextMenu : blockClipboardEvent);
+    });
+  }
+}
+
+function blockClipboardEvent(e) {
+  if (!restrictedClipboardMode) return;
+  e.preventDefault();
+  showToast('Clipboard disabled in restricted mode', 'error');
+}
+
+function blockContextMenu(e) {
+  if (!restrictedClipboardMode) return;
+  e.preventDefault();
+  showToast('Context menu disabled in restricted mode', 'error');
 }
 
 function updateLineNums() {
@@ -117,6 +231,12 @@ function handleTab(e) {
     el.selectionStart = el.selectionEnd = s + 4;
     updateLineNums();
   }
+  if ((e.ctrlKey || e.metaKey) && ['c','v','x','insert'].includes(e.key.toLowerCase())) {
+    if (restrictedClipboardMode) {
+      e.preventDefault();
+      showToast('Clipboard locked while in restricted mode', 'error');
+    }
+  }
 }
 
 function switchTab(tab, btnEl) {
@@ -132,6 +252,8 @@ function switchTab(tab, btnEl) {
   const el = document.getElementById('output-content');
   if (tab === 'tc' && curProblem) {
     el.innerHTML = curProblem.tc.slice(0, 2).map((t, i) => `<div class="test-case"><div class="test-io"><div class="test-io-label">Input ${i + 1}</div>${t.i}</div><div class="test-io"><div class="test-io-label">Expected</div>${t.o}</div></div>`).join('');
+  } else if (tab === 'tc' && curDebugProblem) {
+    el.innerHTML = curDebugProblem.tests.map((t, i) => `<div class="test-case"><div class="test-io"><div class="test-io-label">Input ${i + 1}</div>${t.input}</div><div class="test-io"><div class="test-io-label">Expected</div>${t.expected}</div></div>`).join('');
   } else if (tab === 'sub') {
     el.innerHTML = submissions.length ? submissions.map((s) => `<div class="result-row"><span class="${s.ac ? 'result-pass' : 'result-fail'}">${s.ac ? '✓ Accepted' : '✗ Wrong Answer'}</span><span style="color:var(--muted);font-family:var(--font-code);font-size:.72rem">${s.time}ms · ${s.mem}MB</span><span style="color:var(--muted);font-size:.72rem">${s.lang} · ${s.date}</span></div>`).join('') : '<span style="color:var(--muted)">No submissions yet.</span>';
   } else if (tab === 'res') {
@@ -140,6 +262,24 @@ function switchTab(tab, btnEl) {
 }
 
 function runCode() {
+  if (curDebugProblem) {
+    const btn = document.querySelector('.btn-run');
+    const code = document.getElementById('code-editor').value;
+    btn.innerHTML = '<span class="spinner"></span> Diagnosing';
+    btn.disabled = true;
+    loadBar(.6);
+    setTimeout(() => {
+      btn.innerHTML = '▶ Run';
+      btn.disabled = false;
+      loadBar(1);
+      const res = evaluateDebugSubmission(curDebugProblem, code);
+      switchTab('res', null);
+      document.getElementById('output-content').innerHTML = res.map((r) => `<div class="result-row"><span class="${r.pass ? 'result-pass' : 'result-fail'}">${r.pass ? '✓ Passed' : '✗ Failed'}</span><span style="color:var(--muted);font-size:.78rem">Case ${r.case}: ${r.input}</span><span style="color:var(--muted);font-family:var(--font-code);font-size:.72rem">Expected: ${r.expected}</span></div>`).join('');
+      showToast(res.every((r) => r.pass) ? 'All debug checks passed' : 'Debug run flagged issues', res.every((r) => r.pass) ? 'success' : 'error');
+      setTimeout(() => loadBar(0), 500);
+    }, 1200);
+    return;
+  }
   if (!curProblem) return;
   const btn = document.querySelector('.btn-run');
   btn.innerHTML = '<span class="spinner"></span> Running';
@@ -158,6 +298,37 @@ function runCode() {
 }
 
 function submitCode() {
+  if (curDebugProblem) {
+    const btn = document.querySelector('.btn-submit');
+    const code = document.getElementById('code-editor').value;
+    btn.innerHTML = '<span class="spinner spinner-w"></span> Judging';
+    btn.disabled = true;
+    loadBar(.8);
+    setTimeout(() => {
+      btn.innerHTML = '↑ Submit';
+      btn.disabled = false;
+      loadBar(1);
+      const result = evaluateDebugSubmission(curDebugProblem, code);
+      const ac = result.every((r) => r.pass);
+      const lang = document.getElementById('lang-select').value;
+      const time = Math.floor(Math.random() * 90) + 28;
+      const mem = (Math.random() * 7 + 12).toFixed(1);
+      debugSubmissions.unshift({ id: curDebugProblem.id, ac, time, mem, lang, date: new Date().toLocaleTimeString() });
+      if (ac) {
+        const state = getStoredProgress();
+        if (!state.debugging.includes(curDebugProblem.id)) {
+          state.debugging.push(curDebugProblem.id);
+          localStorage.setItem('codearena-progress', JSON.stringify(state));
+        }
+      }
+      switchTab('res', null);
+      document.getElementById('output-content').innerHTML = `<div class="verdict-box ${ac ? 'verdict-ac' : 'verdict-wa'}">${ac ? '✓ Accepted' : '✗ Failed'}${ac ? `<span style="font-size:.78rem;margin-left:auto">${time}ms · ${mem}MB</span>` : ''}</div><div style="color:var(--muted);font-size:.82rem">${ac ? 'Correct fix for all debugging checks.' : 'One or more cases still fail.'}</div>`;
+      showToast(ac ? '✅ Debugging challenge solved!' : 'Keep tracing the bug', ac ? 'success' : 'error');
+      renderDebuggingProblems(debugSearch);
+      setTimeout(() => loadBar(0), 500);
+    }, 2000);
+    return;
+  }
   if (!curProblem) return;
   const btn = document.querySelector('.btn-submit');
   btn.innerHTML = '<span class="spinner spinner-w"></span> Judging';
@@ -175,6 +346,93 @@ function submitCode() {
     showToast(ac ? '🎉 Accepted!' : 'Wrong Answer – keep trying!', ac ? 'success' : 'error');
     setTimeout(() => loadBar(0), 500);
   }, 2200);
+}
+
+function evaluateDebugSubmission(question, code) {
+  const normalized = (code || '').toLowerCase();
+  const titleWords = question.title.toLowerCase().split(/[^a-z]+/).filter(Boolean);
+  const logicWords = ['if', 'for', 'while', 'return', 'len', 'sum', 'map', 'sort', 'print', 'queue', 'stack', 'node', 'tree', 'null', 'try', 'catch'];
+  const titleHits = titleWords.filter((word) => normalized.includes(word)).length;
+  const logicHits = logicWords.filter((word) => normalized.includes(word)).length;
+  const changed = normalized !== (question.buggyCode || '').toLowerCase();
+  const hasStructure = normalized.length > 50 && (logicHits >= 2 || titleHits >= 1) && !normalized.includes('todo');
+  return question.tests.map((test, idx) => ({
+    case: idx + 1,
+    input: test.input,
+    expected: test.expected,
+    pass: changed && hasStructure
+  }));
+}
+
+function getStoredProgress() {
+  try {
+    const raw = localStorage.getItem('codearena-progress');
+    const parsed = raw ? JSON.parse(raw) : { debugging: [], problems: [] };
+    return {
+      debugging: Array.isArray(parsed.debugging) ? parsed.debugging : [],
+      problems: Array.isArray(parsed.problems) ? parsed.problems : []
+    };
+  } catch (e) {
+    return { debugging: [], problems: [] };
+  }
+}
+
+function renderDashboard() {
+  const profile = JSON.parse(localStorage.getItem('codearena-user') || '{}');
+  const state = getStoredProgress();
+  const pName = profile.username || 'Krish';
+  const solved = state.debugging.length + state.problems.length;
+  const acceptance = Math.min(97, Math.max(72, Math.round((solved / 120) * 100)));
+  const node = document.querySelector('.profile-avatar');
+  if (node) node.textContent = (pName || 'K').trim().charAt(0).toUpperCase();
+  const info = document.querySelector('.profile-info h2');
+  if (info) info.textContent = pName;
+  const infoP = document.querySelector('.profile-info p');
+  if (infoP) infoP.textContent = `Member since ${profile.joined || 'Jan 2024'} · ${state.debugging.length} debug challenges solved`;
+  const nums = document.querySelectorAll('.stat-card-num');
+  if (nums.length >= 4) {
+    nums[0].textContent = String(Math.min(100, solved));
+    nums[1].textContent = String(Math.min(42, state.debugging.length + 5));
+    nums[2].textContent = String((state.debugging.length + 12) * 180);
+    nums[3].textContent = `${acceptance}%`;
+  }
+}
+
+function updatePasswordStrength(inputId) {
+  const input = document.getElementById(inputId);
+  if (!input) return;
+  const val = input.value;
+  const strengthEl = document.getElementById('register-strength');
+  if (!strengthEl) return;
+  let label = 'weak';
+  let lvl = 1;
+  if (val.length >= 8 && /[A-Z]/.test(val) && /\d/.test(val) && /[^A-Za-z0-9]/.test(val)) { label = 'strong'; lvl = 3; }
+  else if (val.length >= 6 && /[A-Za-z]/.test(val) && /\d/.test(val)) { label = 'good'; lvl = 2; }
+  strengthEl.textContent = `Password strength: ${label}`;
+  strengthEl.style.color = lvl === 3 ? 'var(--green)' : lvl === 2 ? 'var(--yellow)' : 'var(--red)';
+}
+
+function renderProfileIdentity() {
+  const saved = JSON.parse(localStorage.getItem('codearena-user') || 'null');
+  const avatar = document.querySelector('.profile-avatar');
+  const h = document.querySelector('.profile-info h2');
+  const p = document.querySelector('.profile-info p');
+  if (!saved) return;
+  if (avatar) avatar.textContent = saved.username.charAt(0).toUpperCase();
+  if (h) h.textContent = saved.username;
+  if (p) p.textContent = `Member since ${saved.joined || 'Jan 2024'} · ${getStoredProgress().debugging.length} debugging tasks solved`;
+}
+
+function togglePasswordVisibility(inputId, btn) {
+  const input = document.getElementById(inputId);
+  if (!input) return;
+  const showing = input.type === 'text';
+  input.type = showing ? 'password' : 'text';
+  btn.textContent = showing ? 'Show' : 'Hide';
+}
+
+function escapeHTML(str = '') {
+  return String(str).replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
 }
 
 function renderLB() {
@@ -1288,7 +1546,51 @@ function catTerm(path) {
 function openModal(n) { document.getElementById('modal-' + n).classList.add('open'); }
 function closeModal(n) { document.getElementById('modal-' + n).classList.remove('open'); }
 document.querySelectorAll('.modal-overlay').forEach((o) => o.addEventListener('click', (e) => { if (e.target === o) o.classList.remove('open'); }));
-function fakeAuth(t) { closeModal(t === 'login' ? 'login' : 'register'); showToast(t === 'login' ? 'Signed in successfully!' : 'Account created! Welcome.', 'success'); }
+
+function handleRegister() {
+  const username = document.getElementById('register-username').value.trim();
+  const email = document.getElementById('register-email').value.trim();
+  const password = document.getElementById('register-password').value;
+  if (!username || !email || !password) {
+    showToast('Please fill in every field.', 'error');
+    return;
+  }
+  if (password.length < 6) {
+    showToast('Password should be at least 6 characters.', 'error');
+    return;
+  }
+  const user = { username, email, password, joined: new Date().toLocaleString('en-US', { month: 'short', year: 'numeric' }) };
+  localStorage.setItem('codearena-user', JSON.stringify(user));
+  localStorage.setItem('codearena-auth', 'true');
+  closeModal('register');
+  renderProfileIdentity();
+  renderDashboard();
+  showToast('Account created! Welcome.', 'success');
+}
+
+function handleLogin() {
+  const emailOrUser = document.getElementById('login-email').value.trim();
+  const password = document.getElementById('login-password').value;
+  const saved = JSON.parse(localStorage.getItem('codearena-user') || 'null');
+  if (!saved) {
+    showToast('No account found. Create one first.', 'error');
+    return;
+  }
+  if ((saved.email === emailOrUser || saved.username === emailOrUser) && saved.password === password) {
+    localStorage.setItem('codearena-auth', 'true');
+    closeModal('login');
+    renderProfileIdentity();
+    renderDashboard();
+    showToast('Signed in successfully!', 'success');
+  } else {
+    showToast('Incorrect email/username or password.', 'error');
+  }
+}
+
+function fakeAuth(t) {
+  if (t === 'login') handleLogin();
+  else handleRegister();
+}
 
 function showToast(msg, type) {
   const t = document.getElementById('toast');
@@ -1301,10 +1603,15 @@ function loadBar(pct) { document.getElementById('loadbar').style.width = (pct * 
 
 document.addEventListener('DOMContentLoaded', () => {
   renderProblems();
+  renderDebuggingProblems();
+  renderDashboard();
+  renderProfileIdentity();
   const ed = document.getElementById('code-editor');
   if (ed) ed.addEventListener('scroll', () => { document.getElementById('line-numbers').scrollTop = ed.scrollTop; });
   const ct = document.getElementById('comp-textarea');
   if (ct) ct.addEventListener('scroll', () => { document.getElementById('comp-lnums').scrollTop = ct.scrollTop; });
   const tw = document.querySelector('.term-window');
   if (tw) tw.addEventListener('click', () => { const i = document.getElementById('term-input'); if (i) i.focus(); });
+  const pInput = document.getElementById('register-password');
+  if (pInput) pInput.addEventListener('input', () => updatePasswordStrength('register-password'));
 });

@@ -14,6 +14,7 @@
     <ul class="nav-links">
       <li><a onclick="showPage('home')" id="nav-home" class="active">Home</a></li>
       <li><a onclick="showPage('problems')" id="nav-problems">Problems</a></li>
+      <li><a onclick="showPage('debugging')" id="nav-debugging">Debugging Arena</a></li>
       <li><a onclick="showPage('compiler')" id="nav-compiler">Compiler</a></li>
       <li><a onclick="showPage('terminal')" id="nav-terminal">Terminal</a></li>
       <li><a onclick="showPage('leaderboard')" id="nav-leaderboard">Leaderboard</a></li>
@@ -62,6 +63,25 @@
     </div>
   </div>
 
+  <div id="page-debugging" class="page">
+    <div class="problems-page debug-page">
+      <div class="page-header">
+        <div class="page-title">Debugging Arena <span style="font-size:.85rem;color:var(--muted);font-weight:400" id="debug-count"></span></div>
+        <input class="search-input" placeholder="🔍 Search debugging tasks…" oninput="filterDebugging(this.value)" id="debug-search"/>
+      </div>
+      <div class="filters">
+        <button class="filter-btn active" onclick="setDebugDiff('all',this)">All</button>
+        <button class="filter-btn" onclick="setDebugDiff('Easy',this)">Easy</button>
+        <button class="filter-btn" onclick="setDebugDiff('Moderate',this)">Moderate</button>
+        <button class="filter-btn" onclick="setDebugDiff('Hard',this)">Hard</button>
+      </div>
+      <table class="problems-table">
+        <thead><tr><th width="44">#</th><th>Title</th><th>Difficulty</th><th>Topic</th><th>Score</th><th>Result</th></tr></thead>
+        <tbody id="debug-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
   <div id="page-solve" class="page solve-page">
     <div class="problem-panel" id="problem-panel-content"></div>
     <div class="editor-panel">
@@ -73,7 +93,11 @@
           <option value="cpp">C++</option>
           <option value="c">C</option>
         </select>
-        <div style="display:flex;gap:.4rem;align-items:center">
+        <div class="editor-options">
+          <label class="mode-toggle">
+            <input type="checkbox" id="restricted-mode-toggle" onchange="toggleRestrictedMode(this.checked)">
+            <span>Restricted Mode</span>
+          </label>
           <button class="btn btn-ghost" onclick="resetCode()" style="font-size:.73rem">↺ Reset</button>
           <button class="btn btn-run" onclick="runCode()">▶ Run</button>
           <button class="btn btn-submit" onclick="submitCode()">↑ Submit</button>
@@ -234,18 +258,22 @@
   </div>
 
   <div class="modal-overlay" id="modal-login">
-    <div class="modal"><h2>Welcome back</h2><p>Sign in to your CodeArena account.</p>
-      <div class="form-group"><label class="form-label">Email</label><input class="form-input" type="email" placeholder="you@example.com"/></div>
-      <div class="form-group"><label class="form-label">Password</label><input class="form-input" type="password" placeholder="••••••••"/></div>
-      <div class="modal-footer"><button class="btn btn-primary" style="flex:1;padding:.6rem" onclick="fakeAuth('login')">Sign In</button><button class="btn btn-ghost" onclick="closeModal('login')">Cancel</button></div>
+    <div class="modal auth-modal"><h2>Welcome back</h2><p>Sign in to continue your practice streak.</p>
+      <div class="form-group"><label class="form-label" for="login-email">Email or username</label><input id="login-email" class="form-input" type="text" placeholder="you@example.com or coder42"/></div>
+      <div class="form-group"><label class="form-label" for="login-password">Password</label><div class="password-wrap"><input id="login-password" class="form-input" type="password" placeholder="••••••••"/><button class="password-toggle" type="button" onclick="togglePasswordVisibility('login-password', this)">Show</button></div></div>
+      <div class="auth-row"><label class="checkbox-row"><input type="checkbox"/> <span>Remember me</span></label><a href="#" class="auth-link">Forgot password?</a></div>
+      <div class="modal-footer"><button class="btn btn-primary" style="flex:1;padding:.6rem" onclick="handleLogin()">Sign In</button><button class="btn btn-ghost" onclick="closeModal('login')">Cancel</button></div>
+      <div class="auth-swap">Need an account? <button class="link-button" onclick="closeModal('login'); openModal('register')">Create one</button></div>
     </div>
   </div>
   <div class="modal-overlay" id="modal-register">
-    <div class="modal"><h2>Create account</h2><p>Join thousands of developers on CodeArena.</p>
-      <div class="form-group"><label class="form-label">Username</label><input class="form-input" placeholder="coolcoder42"/></div>
-      <div class="form-group"><label class="form-label">Email</label><input class="form-input" type="email" placeholder="you@example.com"/></div>
-      <div class="form-group"><label class="form-label">Password</label><input class="form-input" type="password" placeholder="••••••••"/></div>
-      <div class="modal-footer"><button class="btn btn-primary" style="flex:1;padding:.6rem" onclick="fakeAuth('register')">Create Account</button><button class="btn btn-ghost" onclick="closeModal('register')">Cancel</button></div>
+    <div class="modal auth-modal"><h2>Create account</h2><p>Join thousands of developers on CodeArena.</p>
+      <div class="form-group"><label class="form-label" for="register-username">Username</label><input id="register-username" class="form-input" placeholder="coolcoder42"/></div>
+      <div class="form-group"><label class="form-label" for="register-email">Email</label><input id="register-email" class="form-input" type="email" placeholder="you@example.com"/></div>
+      <div class="form-group"><label class="form-label" for="register-password">Password</label><div class="password-wrap"><input id="register-password" class="form-input" type="password" placeholder="••••••••"/><button class="password-toggle" type="button" onclick="togglePasswordVisibility('register-password', this)">Show</button></div></div>
+      <div class="password-strength" id="register-strength">Password strength: weak</div>
+      <div class="modal-footer"><button class="btn btn-primary" style="flex:1;padding:.6rem" onclick="handleRegister()">Create Account</button><button class="btn btn-ghost" onclick="closeModal('register')">Cancel</button></div>
+      <div class="auth-swap">Already have an account? <button class="link-button" onclick="closeModal('register'); openModal('login')">Sign in</button></div>
     </div>
   </div>
   <div id="toast"></div>
