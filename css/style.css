@@ -58,6 +58,16 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:0 1.5r
 .editor-toolbar{display:flex;align-items:center;justify-content:space-between;padding:.45rem .875rem;background:var(--surface);border-bottom:1px solid var(--border);gap:.75rem}
 .lang-select{background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:.3rem .65rem;font-family:var(--font-ui);font-size:.78rem;font-weight:600;cursor:pointer;outline:none}
 .editor-area{flex:1;position:relative;overflow:hidden;display:flex}
+.run-terminal{height:205px;min-height:150px;display:flex;flex-direction:column;background:#0c0e13;border-top:1px solid var(--border);flex-shrink:0}
+.run-terminal-header{display:flex;align-items:center;justify-content:space-between;padding:.35rem .875rem;background:#161922;border-bottom:1px solid var(--border);font-size:.7rem;font-weight:700;color:var(--muted)}
+.run-terminal-header #run-terminal-status,.comp-panel-hdr #comp-status,#term-run-status{margin-left:.55rem;color:var(--accent);font-family:var(--font-code);font-weight:400;text-transform:none}
+.run-terminal-controls{display:flex;align-items:center;gap:.35rem}
+.run-terminal-output{flex:1;min-height:0;overflow:auto;margin:0;padding:.55rem .875rem;color:#c9d1d9;font: .76rem/1.55 var(--font-code);white-space:pre-wrap;overflow-wrap:anywhere}
+.run-terminal-output .run-stderr{color:#f87171}
+.run-terminal-input-row,.comp-run-input{display:flex;align-items:center;gap:.55rem;padding:.4rem .875rem;background:#0c0e13;border-top:1px solid var(--border);flex-shrink:0}
+.run-terminal-input-row span{font-family:var(--font-code);color:var(--green)}
+.run-terminal-input-row input,.comp-run-input input{flex:1;min-width:0;background:transparent;border:0;outline:0;color:var(--text);font: .78rem var(--font-code)}
+.run-terminal-input-row input:disabled,.comp-run-input input:disabled{cursor:not-allowed}
 .code-editor{flex:1;background:var(--bg);color:var(--text);font-family:var(--font-code);font-size:.85rem;line-height:1.7;border:none;outline:none;resize:none;padding:1rem 1rem 1rem 3.25rem;tab-size:4;white-space:pre;overflow-wrap:normal;overflow:auto}
 .line-numbers{position:absolute;left:0;top:0;bottom:0;width:3rem;padding:1rem 0;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;align-items:center;overflow:hidden;pointer-events:none;user-select:none}
 .line-num{font-family:var(--font-code);font-size:.78rem;color:var(--muted);line-height:1.7;width:100%;text-align:center}
@@ -96,6 +106,7 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:0 1.5r
 .comp-out-wrap{flex:1;display:flex;flex-direction:column;overflow:hidden}
 .comp-output{flex:1;overflow-y:auto;padding:.75rem .875rem;font-family:var(--font-code);font-size:.8rem;line-height:1.65;white-space:pre-wrap;word-break:break-all}
 .comp-output.out-success{color:#a3e635}.comp-output.out-error{color:#f87171}.comp-output.out-idle{color:var(--muted)}.comp-output.out-running{color:var(--accent)}
+.comp-run-input{padding:.35rem .875rem}
 .out-meta{display:flex;gap:.875rem;padding:.35rem .875rem;background:var(--surface2);border-top:1px solid var(--border);font-size:.7rem;color:var(--muted);font-family:var(--font-code)}
 .snip-bar{display:flex;gap:5px;padding:.35rem .875rem;background:var(--surface);border-bottom:1px solid var(--border);overflow-x:auto;flex-shrink:0;align-items:center}
 .snip-chip{padding:.18rem .6rem;border-radius:100px;font-size:.68rem;font-weight:700;cursor:pointer;border:1px solid var(--border);background:transparent;color:var(--muted);font-family:var(--font-ui);white-space:nowrap;transition:all .15s}
@@ -133,6 +144,8 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:0 1.5r
 .t-dollar{color:var(--muted);margin:0 6px;flex-shrink:0}
 .t-cmd-text{color:var(--text)}
 .t-out{white-space:pre-wrap;word-break:break-word;width:100%;color:#c9d1d9;padding-left:0}
+.term-output .run-stream{display:block;white-space:pre-wrap;word-break:break-word;color:#c9d1d9}
+.term-output .run-stream.run-stderr{color:#f87171}
 .t-out.err{color:#f87171}.t-out.ok{color:#a3e635}.t-out.info{color:#00e5ff}.t-out.warn{color:var(--yellow)}.t-out.sys{color:#a78bfa}.t-out.dim{color:var(--muted)}
 .term-input-row{display:flex;align-items:center;padding:.45rem .875rem;background:#0c0e13;border-top:1px solid var(--border);flex-shrink:0}
 .t-inp-ps1{color:#27c93f;font-family:var(--font-code);font-size:.83rem;white-space:nowrap;flex-shrink:0}

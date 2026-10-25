@@ -107,6 +107,20 @@
         <div class="line-numbers" id="line-numbers"></div>
         <textarea class="code-editor" id="code-editor" spellcheck="false" oninput="updateLineNums()" onkeydown="handleTab(event)"></textarea>
       </div>
+      <div class="run-terminal">
+        <div class="run-terminal-header">
+          <span>Run Terminal <span id="run-terminal-status">Idle</span></span>
+          <div class="run-terminal-controls">
+            <button class="term-btn" id="run-stop" onclick="stopInteractiveRun()" disabled>Stop</button>
+            <button class="term-btn" onclick="clearRunTerminal()">Clear</button>
+          </div>
+        </div>
+        <pre class="run-terminal-output" id="run-terminal-output" aria-live="polite"></pre>
+        <form class="run-terminal-input-row" onsubmit="sendRunTerminalInput(event)">
+          <span>&gt;</span>
+          <input id="run-terminal-input" autocomplete="off" spellcheck="false" placeholder="Run your program to enter input…" disabled>
+        </form>
+      </div>
       <div class="output-panel">
         <div class="output-tabs">
           <div class="output-tab active" onclick="switchTab('tc',this)">Test Cases</div>
@@ -150,8 +164,9 @@
           <textarea class="comp-stdin" id="comp-stdin" placeholder="Enter program input here…&#10;Example:&#10;5&#10;1 2 3 4 5"></textarea>
         </div>
         <div class="comp-out-wrap">
-          <div class="comp-panel-hdr"><span>📤 Output</span><span id="comp-status" style="font-size:.65rem;padding:.12rem .45rem;border-radius:100px;background:rgba(100,116,139,.15);color:var(--muted)">Idle</span></div>
+          <div class="comp-panel-hdr"><span>📤 Output <span id="comp-status">Idle</span></span><span class="run-terminal-controls"><button class="term-btn" id="comp-stop" onclick="stopInteractiveRun()" disabled>Stop</button><button class="term-btn" onclick="clearCompilerTerminal()">Clear</button></span></div>
           <div class="comp-output out-idle" id="comp-output">// Output will appear here after you click Run Code.</div>
+          <form class="comp-run-input" onsubmit="sendRunTerminalInput(event)"><input id="comp-run-input" autocomplete="off" spellcheck="false" placeholder="Type program input and press Enter…" disabled></form>
           <div class="out-meta" id="comp-meta" style="display:none"><span>⏱ <span id="comp-time">—</span></span><span>💾 <span id="comp-mem">—</span></span><span id="comp-lang-tag">—</span></div>
         </div>
       </div>
@@ -180,6 +195,8 @@
           </div>
           <div class="term-title" id="term-title">user@codearena: ~</div>
           <div class="term-ctrls">
+            <span id="term-run-status">Idle</span>
+            <button class="term-btn" id="term-stop" onclick="stopInteractiveRun()" disabled>Stop</button>
             <button class="term-btn" onclick="clearTerm()">Clear</button>
             <button class="term-btn" onclick="termHelp()">Help</button>
           </div>
@@ -214,9 +231,10 @@
         <div class="cmd-row"><span class="cmd-k">wc &lt;file&gt;</span><span class="cmd-v">word count</span></div>
         <div class="cmd-row"><span class="cmd-k">sort &lt;f&gt;</span><span class="cmd-v">sort lines</span></div>
         <div class="cmd-row"><span class="cmd-k">head/tail</span><span class="cmd-v">view lines</span></div>
-        <div class="cmd-row"><span class="cmd-k">python3</span><span class="cmd-v">run python</span></div>
-        <div class="cmd-row"><span class="cmd-k">node</span><span class="cmd-v">run js</span></div>
-        <div class="cmd-row"><span class="cmd-k">gcc / g++</span><span class="cmd-v">compile C/C++</span></div>
+        <div class="cmd-row"><span class="cmd-k">python3 file.py</span><span class="cmd-v">run Python</span></div>
+        <div class="cmd-row"><span class="cmd-k">node file.js</span><span class="cmd-v">run JavaScript</span></div>
+        <div class="cmd-row"><span class="cmd-k">run file</span><span class="cmd-v">run source file</span></div>
+        <div class="cmd-row"><span class="cmd-k">gcc / g++</span><span class="cmd-v">compile + run C/C++</span></div>
         <div class="cmd-row"><span class="cmd-k">history</span><span class="cmd-v">cmd history</span></div>
         <div class="cmd-row"><span class="cmd-k">clear</span><span class="cmd-v">clear screen</span></div>
         <div class="cmd-row"><span class="cmd-k">whoami</span><span class="cmd-v">current user</span></div>

@@ -1,6 +1,7 @@
 let curProblem = null, diffFilter = 'all', submissions = [], activeTab = 'tc';
 let debugFilter = 'all', debugSearch = '', curDebugProblem = null, debugSubmissions = [];
 let restrictedClipboardMode = false;
+let activeInteractiveRun = null;
 
 function showPage(name){
   document.querySelectorAll('.page').forEach((p) => p.classList.remove('active'));
@@ -255,113 +256,283 @@ function switchTab(tab, btnEl) {
   } else if (tab === 'tc' && curDebugProblem) {
     el.innerHTML = curDebugProblem.tests.map((t, i) => `<div class="test-case"><div class="test-io"><div class="test-io-label">Input ${i + 1}</div>${t.input}</div><div class="test-io"><div class="test-io-label">Expected</div>${t.expected}</div></div>`).join('');
   } else if (tab === 'sub') {
-    el.innerHTML = submissions.length ? submissions.map((s) => `<div class="result-row"><span class="${s.ac ? 'result-pass' : 'result-fail'}">${s.ac ? '✓ Accepted' : '✗ Wrong Answer'}</span><span style="color:var(--muted);font-family:var(--font-code);font-size:.72rem">${s.time}ms · ${s.mem}MB</span><span style="color:var(--muted);font-size:.72rem">${s.lang} · ${s.date}</span></div>`).join('') : '<span style="color:var(--muted)">No submissions yet.</span>';
+    el.innerHTML = submissions.length ? submissions.map((s) => `<div class="result-row"><span class="${s.ac ? 'result-pass' : 'result-fail'}">${s.ac ? '✓ Accepted' : `✗ ${escapeHTML(s.verdict || 'Execution Error')}`}</span><span style="color:var(--muted);font-family:var(--font-code);font-size:.72rem">${[Number.isFinite(s.time) ? `${s.time}ms` : '', Number.isFinite(s.mem) ? `${s.mem}MB` : ''].filter(Boolean).join(' · ')}</span><span style="color:var(--muted);font-size:.72rem">${s.lang} · ${s.date}</span></div>`).join('') : '<span style="color:var(--muted)">No submissions yet.</span>';
   } else if (tab === 'res') {
     el.innerHTML = '<span style="color:var(--muted)">Run your code to see results.</span>';
   }
 }
 
-function runCode() {
-  if (curDebugProblem) {
-    const btn = document.querySelector('.btn-run');
-    const code = document.getElementById('code-editor').value;
-    btn.innerHTML = '<span class="spinner"></span> Diagnosing';
-    btn.disabled = true;
-    loadBar(.6);
-    setTimeout(() => {
-      btn.innerHTML = '▶ Run';
-      btn.disabled = false;
-      loadBar(1);
-      const res = evaluateDebugSubmission(curDebugProblem, code);
-      switchTab('res', null);
-      document.getElementById('output-content').innerHTML = res.map((r) => `<div class="result-row"><span class="${r.pass ? 'result-pass' : 'result-fail'}">${r.pass ? '✓ Passed' : '✗ Failed'}</span><span style="color:var(--muted);font-size:.78rem">Case ${r.case}: ${r.input}</span><span style="color:var(--muted);font-family:var(--font-code);font-size:.72rem">Expected: ${r.expected}</span></div>`).join('');
-      showToast(res.every((r) => r.pass) ? 'All debug checks passed' : 'Debug run flagged issues', res.every((r) => r.pass) ? 'success' : 'error');
-      setTimeout(() => loadBar(0), 500);
-    }, 1200);
-    return;
-  }
-  if (!curProblem) return;
-  const btn = document.querySelector('.btn-run');
-  btn.innerHTML = '<span class="spinner"></span> Running';
-  btn.disabled = true;
-  loadBar(.6);
-  setTimeout(() => {
-    btn.innerHTML = '▶ Run';
-    btn.disabled = false;
-    loadBar(1);
-    const results = curProblem.tc.map((t, i) => ({ t, pass: Math.random() > .3, i }));
-    switchTab('res', null);
-    document.getElementById('output-content').innerHTML = results.map((r) => `<div class="result-row"><span class="${r.pass ? 'result-pass' : 'result-fail'}">${r.pass ? '✓ Passed' : '✗ Failed'}</span><span style="color:var(--muted);font-size:.78rem">Case ${r.i + 1}: ${r.t.i}</span><span style="color:var(--muted);font-family:var(--font-code);font-size:.72rem">Expected: ${r.t.o}</span></div>`).join('');
-    showToast('Ran against test cases', '');
-    setTimeout(() => loadBar(0), 500);
-  }, 1400);
-}
+async function requestJudgeExecution(sourceCode, language, tests) {
+  try {
+    const response = await fetch('/api/judge', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
+      body: JSON.stringify({ sourceCode, language, tests: tests.map((test) => ({
+        stdin: test.stdin,
+        expected: test.expected,
+        ...(test.unordered ? { unordered: true } : {})
+      })) })
+    });
+    if (response.status === 504) {
+      const requestId = response.headers.get('X-Request-ID');
+      throw new Error(`CodeArena gateway returned HTTP 504 before acknowledging the submission.${requestId ? ` Request ID: ${requestId}.` : ''} Check the application and hosting gateway logs.`);
+    }
+    let result = {};
+    try { result = await response.json(); } catch (_) {
+      throw new Error(`Judge API returned an invalid response (HTTP ${response.status}).`);
+    }
+    if (!response.ok && response.status !== 202) throw new Error(result.error || `Judge API returned HTTP ${response.status}`);
+    if (!result.executionId) throw new Error('Judge API did not return an execution ID.');
 
-function submitCode() {
-  if (curDebugProblem) {
-    const btn = document.querySelector('.btn-submit');
-    const code = document.getElementById('code-editor').value;
-    btn.innerHTML = '<span class="spinner spinner-w"></span> Judging';
-    btn.disabled = true;
-    loadBar(.8);
-    setTimeout(() => {
-      btn.innerHTML = '↑ Submit';
-      btn.disabled = false;
-      loadBar(1);
-      const result = evaluateDebugSubmission(curDebugProblem, code);
-      const ac = result.every((r) => r.pass);
-      const lang = document.getElementById('lang-select').value;
-      const time = Math.floor(Math.random() * 90) + 28;
-      const mem = (Math.random() * 7 + 12).toFixed(1);
-      debugSubmissions.unshift({ id: curDebugProblem.id, ac, time, mem, lang, date: new Date().toLocaleTimeString() });
-      if (ac) {
-        const state = getStoredProgress();
-        if (!state.debugging.includes(curDebugProblem.id)) {
-          state.debugging.push(curDebugProblem.id);
-          localStorage.setItem('codearena-progress', JSON.stringify(state));
-        }
+    while (result.state !== 'completed' && result.state !== 'failed') {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      const poll = await fetch(`/api/judge?id=${encodeURIComponent(result.executionId)}`);
+      if (poll.status === 504) {
+        const requestId = poll.headers.get('X-Request-ID') || result.requestId;
+        throw new Error(`CodeArena gateway timed out while checking this execution. The job may still be running.${requestId ? ` Request ID: ${requestId}.` : ''}`);
       }
-      switchTab('res', null);
-      document.getElementById('output-content').innerHTML = `<div class="verdict-box ${ac ? 'verdict-ac' : 'verdict-wa'}">${ac ? '✓ Accepted' : '✗ Failed'}${ac ? `<span style="font-size:.78rem;margin-left:auto">${time}ms · ${mem}MB</span>` : ''}</div><div style="color:var(--muted);font-size:.82rem">${ac ? 'Correct fix for all debugging checks.' : 'One or more cases still fail.'}</div>`;
-      showToast(ac ? '✅ Debugging challenge solved!' : 'Keep tracing the bug', ac ? 'success' : 'error');
-      renderDebuggingProblems(debugSearch);
-      setTimeout(() => loadBar(0), 500);
-    }, 2000);
-    return;
+      try { result = await poll.json(); } catch (_) {
+        throw new Error(`Judge status request returned an invalid response (HTTP ${poll.status}).`);
+      }
+      if (!poll.ok) throw new Error(result.error || `Judge status request returned HTTP ${poll.status}`);
+    }
+    return result;
+  } catch (error) {
+    return { verdict: 'Execution Error', errorCategory: 'execution_unavailable', error: error.message };
   }
-  if (!curProblem) return;
-  const btn = document.querySelector('.btn-submit');
-  btn.innerHTML = '<span class="spinner spinner-w"></span> Judging';
-  btn.disabled = true;
-  loadBar(.8);
-  setTimeout(() => {
-    btn.innerHTML = '↑ Submit';
-    btn.disabled = false;
-    loadBar(1);
-    const ac = Math.random() > .4, lang = document.getElementById('lang-select').value;
-    const t = Math.floor(Math.random() * 80) + 20, mem = (Math.random() * 5 + 13).toFixed(1);
-    submissions.unshift({ ac, time: t, mem, lang, date: new Date().toLocaleTimeString() });
-    switchTab('res', null);
-    document.getElementById('output-content').innerHTML = `<div class="verdict-box ${ac ? 'verdict-ac' : 'verdict-wa'}">${ac ? '✓ Accepted' : '✗ Wrong Answer'}${ac ? `<span style="font-size:.78rem;margin-left:auto">${t}ms · ${mem}MB</span>` : ''}</div><div style="color:var(--muted);font-size:.82rem">${ac ? 'All test cases passed!' : 'Check your logic and try again.'}</div>`;
-    showToast(ac ? '🎉 Accepted!' : 'Wrong Answer – keep trying!', ac ? 'success' : 'error');
-    setTimeout(() => loadBar(0), 500);
-  }, 2200);
 }
 
-function evaluateDebugSubmission(question, code) {
-  const normalized = (code || '').toLowerCase();
-  const titleWords = question.title.toLowerCase().split(/[^a-z]+/).filter(Boolean);
-  const logicWords = ['if', 'for', 'while', 'return', 'len', 'sum', 'map', 'sort', 'print', 'queue', 'stack', 'node', 'tree', 'null', 'try', 'catch'];
-  const titleHits = titleWords.filter((word) => normalized.includes(word)).length;
-  const logicHits = logicWords.filter((word) => normalized.includes(word)).length;
-  const changed = normalized !== (question.buggyCode || '').toLowerCase();
-  const hasStructure = normalized.length > 50 && (logicHits >= 2 || titleHits >= 1) && !normalized.includes('todo');
-  return question.tests.map((test, idx) => ({
-    case: idx + 1,
-    input: test.input,
-    expected: test.expected,
-    pass: changed && hasStructure
-  }));
+function getInteractiveRunUI(mode) {
+  if (mode === 'compiler') {
+    return {
+      output: document.getElementById('comp-output'),
+      status: document.getElementById('comp-status'),
+      input: document.getElementById('comp-run-input'),
+      stop: document.getElementById('comp-stop')
+    };
+  }
+  if (mode === 'terminal') {
+    return {
+      output: document.getElementById('term-output'),
+      status: document.getElementById('term-run-status'),
+      input: document.getElementById('term-input'),
+      stop: document.getElementById('term-stop')
+    };
+  }
+  return {
+    output: document.getElementById('run-terminal-output'),
+    status: document.getElementById('run-terminal-status'),
+    input: document.getElementById('run-terminal-input'),
+    stop: document.getElementById('run-stop')
+  };
+}
+
+function appendInteractiveRunOutput(run, stream, text) {
+  const output = run.ui.output;
+  const span = document.createElement('span');
+  span.className = run.mode === 'terminal'
+    ? `t-line run-stream${stream === 'stderr' ? ' run-stderr' : ''}`
+    : stream === 'stderr' ? 'run-stderr' : '';
+  span.textContent = text;
+  output.appendChild(span);
+  output.scrollTop = output.scrollHeight;
+}
+
+function setInteractiveRunState(run, state) {
+  if (run.ui.status) run.ui.status.textContent = state;
+  if (run.ui.input && run.mode !== 'terminal') run.ui.input.disabled = state !== 'Running';
+  if (run.ui.stop) run.ui.stop.disabled = state !== 'Running' && state !== 'Starting';
+}
+
+async function postInteractiveInput(run, text, echo = false) {
+  if (!run || run.finished) return;
+  try {
+    const response = await fetch(`/api/run/${encodeURIComponent(run.id)}/input`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ data: text })
+    });
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.error || `Input request failed (HTTP ${response.status}).`);
+    if (echo) appendInteractiveRunOutput(run, 'stdout', `> ${text}`);
+  } catch (error) {
+    appendInteractiveRunOutput(run, 'stderr', `\nInput error: ${error.message}\n`);
+  }
+}
+
+async function startInteractiveRun(sourceCode, language, mode = 'problem', initialInput = '') {
+  if (activeInteractiveRun && !activeInteractiveRun.finished) {
+    const previousRun = activeInteractiveRun;
+    await stopInteractiveRun();
+    if (previousRun.events) previousRun.events.close();
+    previousRun.finished = true;
+  }
+  const ui = getInteractiveRunUI(mode);
+  ui.output.textContent = '';
+  if (mode === 'compiler') {
+    document.getElementById('comp-meta').style.display = 'none';
+    ui.output.className = 'comp-output out-running';
+  }
+  const run = { id: null, ui, mode, events: null, finished: false };
+  setInteractiveRunState(run, 'Starting');
+  activeInteractiveRun = run;
+  try {
+    const response = await fetch('/api/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sourceCode, language })
+    });
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.error || `Run request failed (HTTP ${response.status}).`);
+    run.id = body.runId;
+    if (!run.id) throw new Error('Run API did not return a session ID.');
+    const events = new EventSource(`/api/run/${encodeURIComponent(run.id)}/events`);
+    run.events = events;
+    events.addEventListener('status', (event) => {
+      const status = JSON.parse(event.data);
+      if (status.state === 'running') {
+        setInteractiveRunState(run, 'Running');
+        if (run.ui.input) run.ui.input.focus();
+        if (initialInput) {
+          const stdin = initialInput;
+          initialInput = '';
+          postInteractiveInput(run, stdin);
+        }
+      } else if (status.state === 'stopping') {
+        setInteractiveRunState(run, 'Stopping');
+      } else if (status.state === 'starting') {
+        setInteractiveRunState(run, 'Starting');
+      }
+    });
+    events.addEventListener('stdout', (event) => appendInteractiveRunOutput(run, 'stdout', JSON.parse(event.data).data));
+    events.addEventListener('stderr', (event) => appendInteractiveRunOutput(run, 'stderr', JSON.parse(event.data).data));
+    events.addEventListener('finished', (event) => {
+      const result = JSON.parse(event.data);
+      run.finished = true;
+      events.close();
+      const labels = {
+        completed: result.exitCode === 0 ? 'Finished' : `Exited (${result.exitCode ?? result.signal ?? 'error'})`,
+        stopped: 'Stopped',
+        timeout: 'Timed out',
+        output_limit: 'Output limit',
+        program_error: 'Program error',
+        runner_error: 'Runner unavailable',
+        process_error: 'Runner error',
+        runner_unavailable: 'Runner unavailable'
+      };
+      const state = labels[result.state] || 'Finished';
+      setInteractiveRunState(run, state);
+      if (result.state !== 'completed' || result.exitCode !== 0) {
+        appendInteractiveRunOutput(run, result.state === 'completed' ? 'stderr' : 'stdout', `\n[${state}]\n`);
+      } else {
+        appendInteractiveRunOutput(run, 'stdout', '\n[Program exited successfully]\n');
+      }
+      if (activeInteractiveRun === run) activeInteractiveRun = null;
+    });
+    events.onerror = () => {
+      if (!run.finished && events.readyState === EventSource.CLOSED) {
+        appendInteractiveRunOutput(run, 'stderr', '\n[Connection to the run session was lost.]\n');
+        setInteractiveRunState(run, 'Connection lost');
+      }
+    };
+  } catch (error) {
+    run.finished = true;
+    setInteractiveRunState(run, 'Error');
+    appendInteractiveRunOutput(run, 'stderr', `${error.message}\n`);
+    if (activeInteractiveRun === run) activeInteractiveRun = null;
+  }
+}
+
+async function stopInteractiveRun() {
+  const run = activeInteractiveRun;
+  if (!run || run.finished || !run.id) return;
+  setInteractiveRunState(run, 'Stopping');
+  try {
+    const response = await fetch(`/api/run/${encodeURIComponent(run.id)}/stop`, { method: 'POST' });
+    if (!response.ok) {
+      const body = await response.json();
+      appendInteractiveRunOutput(run, 'stderr', `\nStop failed: ${body.error || response.statusText}\n`);
+    }
+  } catch (error) {
+    appendInteractiveRunOutput(run, 'stderr', `\nStop failed: ${error.message}\n`);
+  }
+}
+
+function sendRunTerminalInput(event) {
+  event.preventDefault();
+  const input = event.currentTarget.querySelector('input');
+  const run = activeInteractiveRun;
+  if (!run || run.finished) return;
+  const text = `${input.value}\n`;
+  input.value = '';
+  postInteractiveInput(run, text, true);
+}
+
+function clearRunTerminal() {
+  document.getElementById('run-terminal-output').textContent = '';
+}
+
+async function judgeSubmission(tests) {
+  const sourceCode = document.getElementById('code-editor').value;
+  const language = document.getElementById('lang-select').value;
+  return requestJudgeExecution(sourceCode, language, tests);
+}
+
+function renderJudgeResult(result, tests) {
+  switchTab('res', null);
+  const accepted = result.verdict === 'Accepted';
+  const isRunOnly = tests.some((test) => test.expected === '__RUN_ONLY__');
+  const detail = isRunOnly && accepted
+    ? 'Program completed. Output is shown below.'
+    : accepted
+      ? 'All required test cases passed.'
+    : result.verdict === 'Wrong Answer'
+      ? `Case ${result.caseNumber}: expected <strong>${escapeHTML(result.expected || '')}</strong>; actual <strong>${escapeHTML(result.actual || '')}</strong>`
+      : escapeHTML(result.error || result.stderr || 'Execution did not complete.');
+  const metrics = [];
+  if (typeof result.time === 'number' && Number.isFinite(result.time)) metrics.push(`${result.time}ms`);
+  if (typeof result.memory === 'number' && Number.isFinite(result.memory)) metrics.push(`${result.memory}MB`);
+  const meta = metrics.length ? `<span style="font-size:.78rem;margin-left:auto">${metrics.join(' · ')}</span>` : '';
+  const verdictClass = accepted ? 'verdict-ac' : 'verdict-wa';
+  const output = isRunOnly && result.results && result.results[0]
+    ? `<pre class="example-block" style="white-space:pre-wrap;overflow:auto">${escapeHTML(result.results[0].actual || '')}</pre>`
+    : '';
+  document.getElementById('output-content').innerHTML = `<div class="verdict-box ${verdictClass}">${accepted ? (isRunOnly ? '✓ Finished' : '✓ Accepted') : `✗ ${escapeHTML(result.verdict || 'Execution Error')}`}${meta}</div><div style="color:var(--muted);font-size:.82rem">${detail}</div>${output}${result.stderr && result.verdict !== 'Wrong Answer' ? `<pre class="example-block" style="white-space:pre-wrap;overflow:auto">${escapeHTML(result.stderr)}</pre>` : ''}`;
+}
+
+async function runCode() {
+  if (!curProblem && !curDebugProblem) return;
+  const sourceCode = document.getElementById('code-editor').value;
+  const language = document.getElementById('lang-select').value;
+  await startInteractiveRun(sourceCode, language, 'problem');
+}
+
+async function submitCode() {
+  if (!curProblem && !curDebugProblem) return;
+  const btn = document.querySelector('.btn-submit');
+  const lang = document.getElementById('lang-select').value;
+  const tests = curProblem
+    ? curProblem.tc.map((test) => ({
+      stdin: test.i,
+      expected: test.o,
+      ...(test.unordered ? { unordered: true } : {})
+    }))
+    : curDebugProblem.tests.map((test) => ({ stdin: test.input, expected: test.expected }));
+  btn.innerHTML = '<span class="spinner spinner-w"></span> Judging'; btn.disabled = true; loadBar(.8);
+  const result = await judgeSubmission(tests);
+  btn.innerHTML = '↑ Submit'; btn.disabled = false; loadBar(1);
+  const accepted = result.verdict === 'Accepted';
+  if (curProblem) submissions.unshift({ ac: accepted, verdict: result.verdict, time: result.time, mem: result.memory, lang, date: new Date().toLocaleTimeString() });
+  if (curDebugProblem) {
+    debugSubmissions.unshift({ id: curDebugProblem.id, ac: accepted, time: result.time, mem: result.memory, lang, date: new Date().toLocaleTimeString() });
+    if (accepted) {
+      const state = getStoredProgress();
+      if (!state.debugging.includes(curDebugProblem.id)) { state.debugging.push(curDebugProblem.id); localStorage.setItem('codearena-progress', JSON.stringify(state)); }
+      renderDebuggingProblems(debugSearch);
+    }
+  }
+  renderJudgeResult(result, tests);
+  showToast(accepted ? 'Accepted!' : result.verdict, accepted ? 'success' : 'error');
+  setTimeout(() => loadBar(0), 500);
 }
 
 function getStoredProgress() {
@@ -412,15 +583,39 @@ function updatePasswordStrength(inputId) {
   strengthEl.style.color = lvl === 3 ? 'var(--green)' : lvl === 2 ? 'var(--yellow)' : 'var(--red)';
 }
 
+function renderAuthControls() {
+  const container = document.querySelector('.nav-right');
+  if (!container) return;
+  const current = window.__codearenaSessionUser;
+  if (current) {
+    container.innerHTML = '<button class="btn btn-ghost" onclick="handleLogout()">Sign Out</button>';
+    return;
+  }
+  container.innerHTML = '<button class="btn btn-ghost" onclick="openModal(\'login\')">Sign In</button><button class="btn btn-primary" onclick="openModal(\'register\')">Register</button>';
+}
+
+async function refreshAuthState() {
+  try {
+    const response = await fetch('/api/auth/me', { credentials: 'same-origin' });
+    const data = await response.json();
+    window.__codearenaSessionUser = response.ok && data.authenticated && data.user ? data.user : null;
+  } catch (error) {
+    window.__codearenaSessionUser = null;
+  }
+  renderAuthControls();
+  renderProfileIdentity();
+  renderDashboard();
+}
+
 function renderProfileIdentity() {
-  const saved = JSON.parse(localStorage.getItem('codearena-user') || 'null');
+  const saved = window.__codearenaSessionUser || JSON.parse(localStorage.getItem('codearena-user') || 'null');
   const avatar = document.querySelector('.profile-avatar');
   const h = document.querySelector('.profile-info h2');
   const p = document.querySelector('.profile-info p');
   if (!saved) return;
   if (avatar) avatar.textContent = saved.username.charAt(0).toUpperCase();
   if (h) h.textContent = saved.username;
-  if (p) p.textContent = `Member since ${saved.joined || 'Jan 2024'} · ${getStoredProgress().debugging.length} debugging tasks solved`;
+  if (p) p.textContent = `Member since ${saved.joined || saved.joinedAt || 'Jan 2024'} · ${getStoredProgress().debugging.length} debugging tasks solved`;
 }
 
 function togglePasswordVisibility(inputId, btn) {
@@ -477,13 +672,6 @@ const CLANG_CFG = {
     code: `// C (GCC)\n#include <stdio.h>\n#include <stdlib.h>\nint main(){\n    int n;\n    scanf("%d",&n);\n    int nums[n];\n    for(int i=0;i<n;i++) scanf("%d",&nums[i]);\n    long long s=0;\n    for(int i=0;i<n;i++) s+=nums[i];\n    printf("%lld\\n",s);\n    return 0;\n}\n`,
     snips: [{ l: 'Read Int', c: 'int n;\nscanf("%d",&n);\n' }, { l: 'Read Array', c: 'int arr[n];\nfor(int i=0;i<n;i++) scanf("%d",&arr[i]);\n' }, { l: 'Printf', c: 'printf("%d\\n",result);\n' }, { l: 'For Loop', c: 'for(int i=0;i<n;i++){\n    \n}\n' }, { l: 'Malloc', c: 'int* arr=(int*)malloc(n*sizeof(int));\nfree(arr);\n' }, { l: 'Strcmp', c: 'if(strcmp(a,b)==0){/* equal */}\n' }, { l: 'qsort', c: 'int cmp(const void*a,const void*b){return(*(int*)a-*(int*)b);} \nqsort(arr,n,sizeof(int),cmp);\n' }]
   }
-};
-const COUT_SAMPLES = {
-  python: [{ o: '15\n', t: '42ms', m: '8.2MB' }, { o: 'Hello, World!\n', t: '38ms', m: '7.9MB' }],
-  javascript: [{ o: '15\n', t: '68ms', m: '18.4MB' }, { o: 'Hello, World!\n', t: '72ms', m: '17.8MB' }],
-  java: [{ o: '15\n', t: '185ms', m: '42.1MB' }, { o: 'Hello, World!\n', t: '192ms', m: '41.8MB' }],
-  cpp: [{ o: '15\n', t: '12ms', m: '3.8MB' }, { o: 'Hello, World!\n', t: '10ms', m: '3.5MB' }],
-  c: [{ o: '15\n', t: '8ms', m: '1.2MB' }, { o: 'Hello, World!\n', t: '7ms', m: '1.1MB' }]
 };
 let cLang = 'python', cCode = {};
 
@@ -598,99 +786,18 @@ function resetCompOut() {
   b.style.color = 'var(--muted)';
 }
 
-function compRun() {
+async function compRun() {
   const code = document.getElementById('comp-textarea').value.trim();
-  if (!code) {
-    showToast('Write some code first!', 'error');
-    return;
-  }
+  if (!code) { showToast('Write some code first!', 'error'); return; }
   const btn = document.querySelector('.compiler-page .btn-run');
-  btn.innerHTML = '<span class="spinner"></span> Running…';
-  btn.disabled = true;
-  loadBar(.7);
-  const o = document.getElementById('comp-output');
-  o.textContent = '⟳  Compiling…';
-  o.className = 'comp-output out-running';
-  const b = document.getElementById('comp-status');
-  b.textContent = 'Running';
-  b.style.background = 'rgba(0,229,255,.12)';
-  b.style.color = 'var(--accent)';
-  const delay = { python: 900, javascript: 700, java: 1800, cpp: 1200, c: 1000 };
-  setTimeout(() => {
-    btn.innerHTML = '▶ Run Code';
-    btn.disabled = false;
-    loadBar(1);
-    setTimeout(() => loadBar(0), 500);
-    const err = Math.random() < .15;
-    if (err) {
-      const errs = {
-        python: `Traceback (most recent call last):\n  File "main.py", line 2\n    n = int(input())\nEOFError: EOF when reading a line`,
-        javascript: `RangeError: idx out of bounds\n    at Object.<anonymous> (main.js:3:15)`,
-        java: `Main.java:5: error: illegal start of expression\n1 error`,
-        cpp: `main.cpp:5:5: error: 'vcetor' was not declared in this scope`,
-        c: `main.c:5:5: error: use of undeclared identifier 'pritnf'`
-      };
-      o.textContent = errs[cLang];
-      o.className = 'comp-output out-error';
-      b.textContent = 'Error';
-      b.style.background = 'rgba(239,68,68,.15)';
-      b.style.color = 'var(--red)';
-      document.getElementById('comp-meta').style.display = 'none';
-      showToast('Runtime error', 'error');
-    } else {
-      const stdin = document.getElementById('comp-stdin').value.trim();
-      const outText = simOut(code, stdin, cLang);
-      o.textContent = outText;
-      o.className = 'comp-output out-success';
-      b.textContent = 'Success';
-      b.style.background = 'rgba(34,197,94,.15)';
-      b.style.color = 'var(--green)';
-      const s = COUT_SAMPLES[cLang][Math.floor(Math.random() * COUT_SAMPLES[cLang].length)];
-      document.getElementById('comp-time').textContent = s.t;
-      document.getElementById('comp-mem').textContent = s.m;
-      document.getElementById('comp-lang-tag').textContent = CLANG_CFG[cLang].file;
-      document.getElementById('comp-meta').style.display = 'flex';
-      showToast(`Done in ${s.t} · ${s.m}`, 'success');
-    }
-  }, delay[cLang]);
+  const stdin = document.getElementById('comp-stdin').value;
+  btn.innerHTML = '<span class="spinner"></span> Starting…'; btn.disabled = true; loadBar(.7);
+  await startInteractiveRun(code, cLang, 'compiler', stdin);
+  btn.innerHTML = '▶ Run Code'; btn.disabled = false; loadBar(1); setTimeout(() => loadBar(0), 500);
 }
 
-function simOut(code, stdin, lang) {
-  const ls = stdin ? stdin.split('\n') : [];
-  if (/hello[,\s]*world/i.test(code)) return 'Hello, World!\n';
-  const sm = code.match(/print\(["'](.+?)["']\)|console\.log\(["'](.+?)["']\)|cout\s*<<\s*["'](.+?)["']/);
-  if (sm) return (sm[1] || sm[2] || sm[3]) + '\n';
-  if (/fib/i.test(code)) {
-    const n = parseInt(ls[0]) || 10;
-    const f = [0, 1];
-    for (let i = 2; i <= Math.min(n, 14); i++) f.push(f[i - 1] + f[i - 2]);
-    return f.join(' ') + '\n';
-  }
-  if (/factorial/i.test(code)) {
-    const n = parseInt(ls[0]) || 5;
-    let r = 1;
-    for (let i = 2; i <= n; i++) r *= i;
-    return `${r}\n`;
-  }
-  if (/prime/i.test(code)) {
-    const n = parseInt(ls[0]) || 10;
-    const primes = [];
-    for (let i = 2; primes.length < n; i++) {
-      let ok = true;
-      for (let j = 2; j * j <= i; j++) if (i % j === 0) { ok = false; break; }
-      if (ok) primes.push(i);
-    }
-    return primes.join(' ') + '\n';
-  }
-  if (ls.length >= 2) {
-    const nums = ls[1]?.split(/\s+/).map(Number).filter((x) => !isNaN(x));
-    if (nums && nums.length > 0) return `${nums.reduce((a, b) => a + b, 0)}\n`;
-  }
-  if (ls.length === 1) {
-    const n = parseInt(ls[0]);
-    if (!isNaN(n)) return `${n}\n`;
-  }
-  return COUT_SAMPLES[lang][Math.floor(Math.random() * COUT_SAMPLES[lang].length)].o;
+function clearCompilerTerminal() {
+  document.getElementById('comp-output').textContent = '';
 }
 
 let VFS = {
@@ -797,8 +904,8 @@ function initTerminal() {
   const out = document.getElementById('term-output');
   out.innerHTML = '';
   termPrint('<span class="t-out sys">  ____          _        _    \n / ___|___   __| | ___  / \\   _ __ ___ _ __   __ _ \n| |   / _ \\ / _\` |/ _ \\/ _ \\ | \'__ / _ \\ \'_ \\ / _\` |\n| |__| (_) | (_| |  __/ ___ \\| | |  __/ | | | (_| |\n \\____\\___/ \\__,_|\\___/_/   \\_\\_|  \\___|_| |_|\\__,_|\n</span>');
-  termPrint('<span class="t-out info">CodeArena Terminal v2.0 — Linux-style shell simulator</span>');
-  termPrint('<span class="t-out dim">Type <span style="color:var(--accent)">help</span> for available commands. Tab autocomplete supported.</span>');
+  termPrint('<span class="t-out info">CodeArena Terminal v2.0 — isolated code runner</span>');
+  termPrint('<span class="t-out dim">Shell utilities are simulated. Python and C-family files run in isolated containers. Type <span style="color:var(--accent)">help</span> for commands.</span>');
   termPrint('<span class="t-out dim">Current directory: ' + shortPath(termCwd) + '</span>');
   termPrint('');
   document.getElementById('term-input').focus();
@@ -829,6 +936,13 @@ function escHTML(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').repl
 function handleTermKey(e) {
   const inp = document.getElementById('term-input');
   if (e.key === 'Enter') {
+    if (activeInteractiveRun && activeInteractiveRun.mode === 'terminal' && !activeInteractiveRun.finished) {
+      e.preventDefault();
+      const text = `${inp.value}\n`;
+      inp.value = '';
+      postInteractiveInput(activeInteractiveRun, text, true);
+      return;
+    }
     const cmd = inp.value.trim();
     inp.value = '';
     if (cmd) {
@@ -859,7 +973,12 @@ function handleTermKey(e) {
   } else if (e.key === 'c' && e.ctrlKey) {
     e.preventDefault();
     inp.value = '';
-    termPrint('<span class="t-out dim">^C</span>');
+    if (activeInteractiveRun && activeInteractiveRun.mode === 'terminal' && !activeInteractiveRun.finished) {
+      termPrint('<span class="t-out dim">^C — stopping program</span>');
+      stopInteractiveRun();
+    } else {
+      termPrint('<span class="t-out dim">^C</span>');
+    }
   } else if (e.key === 'l' && e.ctrlKey) {
     e.preventDefault();
     clearTerm();
@@ -1267,38 +1386,34 @@ function execTerm(input) {
     case 'python3':
     case 'python': {
       if (!args[0]) {
-        termPrint('<span class="t-out warn">Python 3.11.0 (simulated)</span><span class="t-out dim">>>> (interactive mode not supported — run a file: python3 filename.py)</span>');
+        termPrint('<span class="t-out warn">Run a Python file: python3 filename.py</span>');
         return;
       }
       const fp = resolvePath(args[0], termCwd); const node = getNode(fp);
-      if (!node) {
+      if (!node || node.type !== 'file') {
         termPrint(`<span class="t-out err">python3: can't open file '${escHTML(args[0])}': [Errno 2] No such file or directory</span>`);
         return;
       }
-      const code = node.content || '';
-      const out = simPython(code);
-      out.split('\n').forEach((l) => l && termPrint(`<span class="t-out ok">${escHTML(l)}</span>`));
+      startInteractiveRun(node.content || '', 'python', 'terminal');
       break;
     }
     case 'node':
     case 'nodejs': {
       if (!args[0]) {
-        termPrint('<span class="t-out warn">Node.js v20.0.0 (simulated)</span><span class="t-out dim">> (REPL not supported — run: node filename.js)</span>');
+        termPrint('<span class="t-out warn">Node.js v20.0.0 (sandboxed / simulated)</span><span class="t-out dim">> (REPL not supported — run: node filename.js)</span>');
         return;
       }
       const fp = resolvePath(args[0], termCwd); const node = getNode(fp);
-      if (!node) {
+      if (!node || node.type !== 'file') {
         termPrint(`<span class="t-out err">Error: Cannot find module '${escHTML(args[0])}'</span>`);
         return;
       }
-      const code = node.content || '';
-      simJS(code).split('\n').forEach((l) => l && termPrint(`<span class="t-out ok">${escHTML(l)}</span>`));
+      startInteractiveRun(node.content || '', 'javascript', 'terminal');
       break;
     }
     case 'gcc':
     case 'g++': {
       const files = args.filter((a) => !a.startsWith('-'));
-      const out = args[args.indexOf('-o') + 1] || 'a.out';
       if (!files[0]) {
         termPrint(`<span class="t-out err">${command}: fatal error: no input files</span>`);
         return;
@@ -1308,24 +1423,36 @@ function execTerm(input) {
         termPrint(`<span class="t-out err">${command}: ${escHTML(files[0])}: No such file or directory</span>`);
         return;
       }
-      const pDir = getNode(termCwd);
-      if (pDir && pDir.children) pDir.children[out] = { type: 'file', content: `[binary: ${out}]` };
-      termPrint(`<span class="t-out ok">Compiled successfully → ${escHTML(out)}</span>`);
-      renderTermFS();
+      startInteractiveRun(node.content || '', command === 'gcc' ? 'c' : 'cpp', 'terminal');
+      break;
+    }
+    case 'run': {
+      if (!args[0]) {
+        termPrint('<span class="t-out err">run: specify a .py, .c, .cpp, .js, or .java source file</span>');
+        return;
+      }
+      const fp = resolvePath(args[0], termCwd);
+      const node = getNode(fp);
+      if (!node || node.type !== 'file') {
+        termPrint(`<span class="t-out err">run: ${escHTML(args[0])}: No such file</span>`);
+        return;
+      }
+      const extension = args[0].split('.').pop().toLowerCase();
+      const languageByExtension = { py: 'python', c: 'c', cpp: 'cpp', js: 'javascript', java: 'java' };
+      const language = languageByExtension[extension];
+      if (!language) {
+        termPrint('<span class="t-out err">run: unsupported file type</span>');
+        return;
+      }
+      startInteractiveRun(node.content || '', language, 'terminal');
       break;
     }
     case 'javac': {
-      const files = args.filter((a) => !a.startsWith('-'));
-      if (!files[0]) {
-        termPrint('<span class="t-out err">javac: missing source files</span>');
-        return;
-      }
-      termPrint(`<span class="t-out ok">Compiled ${escHTML(files[0])} successfully</span>`);
+      termPrint('<span class="t-out warn">Use run Main.java to compile and run Java in the isolated container.</span>');
       break;
     }
     case 'java': {
-      termPrint('<span class="t-out warn">Java execution is simulated</span>');
-      termPrint('<span class="t-out ok">Hello from Java!</span>');
+      termPrint('<span class="t-out warn">Use run Main.java to compile and run Java in the isolated container.</span>');
       break;
     }
     case 'history': {
@@ -1429,31 +1556,6 @@ function setFileContent(name, content) {
   if (parent && parent.children) parent.children[fname] = { type: 'file', content };
 }
 
-function simPython(code) {
-  if (/print\(["'](.+?)["']\)/.test(code)) {
-    const m = code.match(/print\(["'](.+?)["']\)/g);
-    return m.map((s) => s.replace(/print\(["'](.+?)["']\)/, '$1')).join('\n');
-  }
-  if (/for.*range.*:/.test(code) && /print/.test(code)) return Array.from({ length: 5 }, (_, i) => i).join('\n');
-  if (/fib/i.test(code)) {
-    const f = [0, 1];
-    for (let i = 2; i < 10; i++) f.push(f[i - 1] + f[i - 2]);
-    return f.join('\n');
-  }
-  if (/factorial/i.test(code)) return '120';
-  if (/print\(sum/.test(code)) return '15';
-  return '(program output)';
-}
-
-function simJS(code) {
-  if (/console\.log\(["'](.+?)["']\)/.test(code)) {
-    const m = code.match(/console\.log\(["'](.+?)["']\)/);
-    return m ? m[1] : '';
-  }
-  if (/reduce.*\+/.test(code)) return '15';
-  return '(program output)';
-}
-
 function clearTerm() {
   document.getElementById('term-output').innerHTML = '';
   termPrint('<span class="t-out dim">Terminal cleared. Type <span style="color:var(--accent)">help</span> for commands.</span>');
@@ -1461,7 +1563,7 @@ function clearTerm() {
 
 function termHelp() {
   const cmds = [
-    ['File System', ''], ['ls [-la] [dir]', 'list directory contents'], ['cd <dir>', 'change directory (use ~ for home)'], ['pwd', 'print working directory'], ['cat <file>', 'view file contents'], ['touch <file>', 'create empty file'], ['mkdir <dir>', 'create directory'], ['rm [-r] <file>', 'remove file or directory'], ['rmdir <dir>', 'remove empty directory'], ['cp <src> <dst>', 'copy file'], ['mv <src> <dst>', 'move or rename'], ['', ''], ['Search & Text', ''], ['grep <pat> <file>', 'search for pattern in file'], ['wc <file>', 'count lines, words, chars'], ['sort <file>', 'sort lines alphabetically'], ['head/tail [-n] <f>', 'show first/last N lines'], ['find <dir> -name', 'find files by name'], ['diff <f1> <f2>', 'compare two files'], ['', ''], ['Run Code', ''], ['python3 <file>', 'run a Python file'], ['node <file>', 'run a JavaScript file'], ['gcc <file> -o out', 'compile C file'], ['g++ <file> -o out', 'compile C++ file'], ['javac <file>', 'compile Java file'], ['', ''], ['Pipes & Redirects', ''], ['cmd | grep <p>', 'pipe to grep'], ['cmd | wc -l', 'pipe to wc'], ['echo txt > file', 'write to file'], ['echo txt >> file', 'append to file'], ['', ''], ['System', ''], ['whoami', 'current user'], ['date', 'current date/time'], ['uname -a', 'system information'], ['ps', 'running processes'], ['env', 'environment variables'], ['df / du', 'disk usage'], ['history', 'command history'], ['which <cmd>', 'find command path'], ['clear / Ctrl+L', 'clear terminal'], ['help', 'show this help']
+    ['File System', ''], ['ls [-la] [dir]', 'list directory contents'], ['cd <dir>', 'change directory (use ~ for home)'], ['pwd', 'print working directory'], ['cat <file>', 'view file contents'], ['touch <file>', 'create empty file'], ['mkdir <dir>', 'create directory'], ['rm [-r] <file>', 'remove file or directory'], ['rmdir <dir>', 'remove empty directory'], ['cp <src> <dst>', 'copy file'], ['mv <src> <dst>', 'move or rename'], ['', ''], ['Search & Text', ''], ['grep <pat> <file>', 'search for pattern in file'], ['wc <file>', 'count lines, words, chars'], ['sort <file>', 'sort lines alphabetically'], ['head/tail [-n] <f>', 'show first/last N lines'], ['find <dir> -name', 'find files by name'], ['diff <f1> <f2>', 'compare two files'], ['', ''], ['Run Code', ''], ['python3 <file>', 'run a Python file'], ['node <file>', 'run a JavaScript file'], ['run <file>', 'run supported source interactively'], ['gcc <file> -o out', 'compile and run C'], ['g++ <file> -o out', 'compile and run C++'], ['', ''], ['Pipes & Redirects', ''], ['cmd | grep <p>', 'pipe to grep'], ['cmd | wc -l', 'pipe to wc'], ['echo txt > file', 'write to file'], ['echo txt >> file', 'append to file'], ['', ''], ['System', ''], ['whoami', 'current user'], ['date', 'current date/time'], ['uname -a', 'system information'], ['ps', 'running processes'], ['env', 'environment variables'], ['df / du', 'disk usage'], ['history', 'command history'], ['which <cmd>', 'find command path'], ['clear / Ctrl+L', 'clear terminal'], ['help', 'show this help']
   ];
   termPrint('<span class="t-out info">╔══════════════ CodeArena Terminal Help ══════════════╗</span>');
   cmds.forEach(([k, v]) => {
@@ -1547,7 +1649,7 @@ function openModal(n) { document.getElementById('modal-' + n).classList.add('ope
 function closeModal(n) { document.getElementById('modal-' + n).classList.remove('open'); }
 document.querySelectorAll('.modal-overlay').forEach((o) => o.addEventListener('click', (e) => { if (e.target === o) o.classList.remove('open'); }));
 
-function handleRegister() {
+async function handleRegister() {
   const username = document.getElementById('register-username').value.trim();
   const email = document.getElementById('register-email').value.trim();
   const password = document.getElementById('register-password').value;
@@ -1555,36 +1657,71 @@ function handleRegister() {
     showToast('Please fill in every field.', 'error');
     return;
   }
-  if (password.length < 6) {
-    showToast('Password should be at least 6 characters.', 'error');
+  if (password.length < 8) {
+    showToast('Password should be at least 8 characters.', 'error');
     return;
   }
-  const user = { username, email, password, joined: new Date().toLocaleString('en-US', { month: 'short', year: 'numeric' }) };
-  localStorage.setItem('codearena-user', JSON.stringify(user));
-  localStorage.setItem('codearena-auth', 'true');
-  closeModal('register');
-  renderProfileIdentity();
-  renderDashboard();
-  showToast('Account created! Welcome.', 'success');
+  try {
+    const response = await fetch('/api/auth/register', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, email, password })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Registration failed.');
+    window.__codearenaSessionUser = data.user;
+    localStorage.setItem('codearena-user', JSON.stringify({ username: data.user.username, email: data.user.email, joined: data.user.joinedAt }));
+    closeModal('register');
+    renderAuthControls();
+    renderProfileIdentity();
+    renderDashboard();
+    showToast('Account created! Welcome.', 'success');
+  } catch (error) {
+    showToast(error.message || 'Registration failed.', 'error');
+  }
 }
 
-function handleLogin() {
-  const emailOrUser = document.getElementById('login-email').value.trim();
+async function handleLogin() {
+  const identifier = document.getElementById('login-email').value.trim();
   const password = document.getElementById('login-password').value;
-  const saved = JSON.parse(localStorage.getItem('codearena-user') || 'null');
-  if (!saved) {
-    showToast('No account found. Create one first.', 'error');
+  if (!identifier || !password) {
+    showToast('Please enter your username/email and password.', 'error');
     return;
   }
-  if ((saved.email === emailOrUser || saved.username === emailOrUser) && saved.password === password) {
-    localStorage.setItem('codearena-auth', 'true');
+  try {
+    const response = await fetch('/api/auth/login', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: identifier, email: identifier, password })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Login failed.');
+    window.__codearenaSessionUser = data.user;
+    localStorage.setItem('codearena-user', JSON.stringify({ username: data.user.username, email: data.user.email, joined: data.user.joinedAt }));
     closeModal('login');
+    renderAuthControls();
     renderProfileIdentity();
     renderDashboard();
     showToast('Signed in successfully!', 'success');
-  } else {
-    showToast('Incorrect email/username or password.', 'error');
+  } catch (error) {
+    showToast(error.message || 'Incorrect email/username or password.', 'error');
   }
+}
+
+async function handleLogout() {
+  try {
+    await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' });
+  } catch (error) {
+    // Ignore network issues so the client can still clear local UI state.
+  }
+  window.__codearenaSessionUser = null;
+  localStorage.removeItem('codearena-user');
+  renderAuthControls();
+  renderProfileIdentity();
+  renderDashboard();
+  showToast('Signed out.', 'success');
 }
 
 function fakeAuth(t) {
@@ -1604,6 +1741,8 @@ function loadBar(pct) { document.getElementById('loadbar').style.width = (pct * 
 document.addEventListener('DOMContentLoaded', () => {
   renderProblems();
   renderDebuggingProblems();
+  renderAuthControls();
+  refreshAuthState();
   renderDashboard();
   renderProfileIdentity();
   const ed = document.getElementById('code-editor');

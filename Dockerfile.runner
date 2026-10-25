@@ -1,0 +1,10 @@
+FROM python:3.12-slim-bookworm
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends gcc g++ nodejs default-jdk-headless coreutils \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY runner.sh /usr/local/bin/madlab-runner
+RUN chmod 0555 /usr/local/bin/madlab-runner
+
+ENTRYPOINT ["/usr/local/bin/madlab-runner"]
